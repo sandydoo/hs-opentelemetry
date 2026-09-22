@@ -86,6 +86,28 @@ Add `hs-opentelemetry-sdk` to your `package.yaml` or Cabal file.
 
 Shutdown: stop the periodic reader (if any), then `meterProviderShutdown` on the provider.
 
+### Disable unused metrics
+
+For environment-based setup, use `OTEL_METRICS_EXPORTER=none` with
+`OpenTelemetry.Metric.initializeGlobalMeterProvider` or `withMeterProvider`.
+The SDK installs a no-op provider and skips resource detection, aggregation
+storage, observable callbacks, and the periodic export thread. Traces and logs
+remain configured independently.
+
+For declarative configuration, an absent or empty `meter_provider.readers`
+list, or a selected reader without an exporter, also produces a no-op provider.
+`disabled: true` disables the metric provider even if a reader is configured.
+
+An unset `OTEL_METRICS_EXPORTER` still selects OTLP by default. Network failures
+do not disable accounting. Configuration is applied at initialization; changing
+an environment variable does not reconfigure existing instruments.
+
+Explicit `createMeterProvider` calls retain their current behavior. A provider
+with no push exporter can still serve manual collection or a Prometheus scrape.
+The SDK does not infer that such a provider is unused from `metricExporter =
+Nothing`. The low-level `resolveMetricExporter` function likewise continues to
+return a discard exporter for `none`; it does not disable an existing provider.
+
 ## Trace Your Code
 
 ### Initialization

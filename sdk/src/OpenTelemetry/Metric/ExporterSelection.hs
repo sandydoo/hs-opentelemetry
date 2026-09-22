@@ -23,7 +23,12 @@ import OpenTelemetry.Internal.Common.Types (ExportResult (..), FlushResult (..),
 * @console@ — human-readable text to stdout
 * @prometheus@ — returns a no-op push exporter; Prometheus is pull-based,
   so the caller should expose an HTTP endpoint using 'OpenTelemetry.Exporter.Prometheus.renderPrometheusText'.
-* @none@ — disabled (export calls succeed but discard data)
+* @none@ — export calls succeed but discard data.
+
+This low-level function selects an exporter, not a provider. A discard exporter
+still leaves any existing provider recording measurements. Use
+'OpenTelemetry.Metric.initializeGlobalMeterProvider' for automatic setup that
+also disables accounting when @none@ is selected.
 -}
 resolveMetricExporter :: IO MetricExporter
 resolveMetricExporter = do

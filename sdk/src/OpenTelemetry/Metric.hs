@@ -130,7 +130,7 @@ import Data.IORef (newIORef)
 import qualified Data.Sequence as Seq
 import OpenTelemetry.Attributes (Attributes, emptyAttributes)
 import OpenTelemetry.Attributes.Attribute (Attribute (..), ToAttribute (..))
-import OpenTelemetry.Environment (MetricsExemplarFilter (..), lookupBooleanEnv)
+import OpenTelemetry.Environment (MetricsExemplarFilter (..), MetricsExporterSelection (..), lookupBooleanEnv, lookupMetricsExporterSelection)
 import OpenTelemetry.Exporter.Metric (AggregationTemporality (..))
 import OpenTelemetry.Internal.Common.Types (FlushResult (..), InstrumentationLibrary (..), ShutdownResult (..))
 import OpenTelemetry.Internal.Logging (otelLogDebug)
@@ -216,10 +216,16 @@ it as the global provider via 'setGlobalMeterProvider'.
 The returned 'MeterProvider' has the periodic reader lifecycle baked into
 its shutdown — call 'shutdownMeterProvider' when the application exits.
 
+With @OTEL_METRICS_EXPORTER=none@, initialization skips resource detection,
+aggregation storage, and the periodic reader. Instrument operations are no-ops.
+This applies only to automatic setup: 'createMeterProvider' still supports
+explicit readers and manual collection without an exporter. An unset variable
+retains the default OTLP exporter; an unreachable exporter does not disable metrics.
+
 Reads:
 
 * @OTEL_SDK_DISABLED@ — if @true@, returns the no-op provider
-* @OTEL_METRICS_EXPORTER@ — selects the exporter (default: @otlp@)
+* @OTEL_METRICS_EXPORTER@ — selects the exporter (default: @otlp@); @none@ returns the no-op provider
 * @OTEL_METRIC_EXPORT_INTERVAL@, @OTEL_METRIC_EXPORT_TIMEOUT@ — periodic reader timing
 * @OTEL_METRICS_EXEMPLAR_FILTER@ — exemplar filter strategy (default: @trace_based@)
 
@@ -228,9 +234,10 @@ Reads:
 initializeGlobalMeterProvider :: IO MeterProvider
 initializeGlobalMeterProvider = do
   disabled <- lookupBooleanEnv "OTEL_SDK_DISABLED"
-  if disabled
+  selection <- lookupMetricsExporterSelection
+  if disabled || selection == Just MetricsExporterNone
     then do
-      otelLogDebug "OTEL_SDK_DISABLED=true, using no-op MeterProvider"
+      otelLogDebug "Metrics disabled by environment configuration, using no-op MeterProvider"
       setGlobalMeterProvider noopMeterProvider
       pure noopMeterProvider
     else do

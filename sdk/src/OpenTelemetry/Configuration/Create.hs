@@ -36,7 +36,7 @@ import OpenTelemetry.Internal.Common.Types (ExportResult (..))
 import OpenTelemetry.Internal.Logging (otelLogWarning)
 import OpenTelemetry.Log.Core (LoggerProvider, LoggerProviderOptions (..), createLoggerProvider, emptyLoggerProviderOptions, shutdownLoggerProvider)
 import OpenTelemetry.MeterProvider
-import OpenTelemetry.Metric.Core (MeterProvider (..), shutdownMeterProvider)
+import OpenTelemetry.Metric.Core (MeterProvider (..), noopMeterProvider, shutdownMeterProvider)
 import OpenTelemetry.MetricReader
 import OpenTelemetry.Processor.Batch.LogRecord (batchLogRecordProcessor)
 import qualified OpenTelemetry.Processor.Batch.LogRecord as BlogProc
@@ -82,12 +82,11 @@ createFromConfig cfg = do
   if disabled
     then do
       tp <- createTracerProvider [] emptyTracerProviderOptions
-      (mp, _env) <- createMeterProvider emptyMaterializedResources defaultSdkMeterProviderOptions
       lp <- createLoggerProvider [] emptyLoggerProviderOptions
       pure
         OTelSignals
           { otelTracerProvider = tp
-          , otelMeterProvider = mp
+          , otelMeterProvider = noopMeterProvider
           , otelLoggerProvider = lp
           , otelPropagators = mempty
           , otelShutdown = pure ()
@@ -254,16 +253,13 @@ buildSpanExporter SpanExporterNone =
       }
 
 
+-- Configuration owns the readers here. Without a consumer, do not aggregate.
 buildMeterProvider :: OTelConfiguration -> MaterializedResources -> IO MeterProvider
 buildMeterProvider cfg res = case configMeterProvider cfg >>= mpReaders of
-  Nothing -> do
-    (mp, _env) <- createMeterProvider res defaultSdkMeterProviderOptions
-    pure mp
+  Nothing -> pure noopMeterProvider
   Just readers -> do
     case readers of
-      [] -> do
-        (mp, _env) <- createMeterProvider res defaultSdkMeterProviderOptions
-        pure mp
+      [] -> pure noopMeterProvider
       (MetricReaderPeriodic pmc : rest) -> do
         when (not (null rest)) $
           otelLogWarning "Multiple metric readers configured; only the first is currently supported — additional readers will be ignored"
@@ -284,9 +280,7 @@ buildMeterProvider cfg res = case configMeterProvider cfg >>= mpReaders of
                     stopPeriodicMetricReader handle
                     meterProviderShutdown mp mTimeout
                 }
-          Nothing -> do
-            (mp, _env) <- createMeterProvider res defaultSdkMeterProviderOptions
-            pure mp
+          Nothing -> pure noopMeterProvider
 
 
 buildMetricExporter :: PushMetricExporterConfig -> IO (Maybe MetricExporter)

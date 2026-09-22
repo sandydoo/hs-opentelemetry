@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Use a no-op metric provider for automatic setup with
+  `OTEL_METRICS_EXPORTER=none` or declarative configuration without a metric
+  consumer. Skip accounting and periodic collection. Explicit providers for
+  manual collection remain active without a push exporter.
+
 - Force counter sums and histogram bucket counts and extrema when recording.
   Repeated measurements no longer retain arithmetic expressions until export.
   This covers integer and double sums, and explicit and exponential histograms.
