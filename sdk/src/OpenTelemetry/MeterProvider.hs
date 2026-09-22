@@ -366,13 +366,13 @@ expHistToDataPoint startT t attrs ehc =
 
 
 minMaybe :: Maybe Double -> Double -> Maybe Double
-minMaybe Nothing v = Just v
-minMaybe (Just a) v = Just (min a v)
+minMaybe Nothing !v = Just v
+minMaybe (Just a) v = let !result = min a v in Just result
 
 
 maxMaybe :: Maybe Double -> Double -> Maybe Double
-maxMaybe Nothing v = Just v
-maxMaybe (Just a) v = Just (max a v)
+maxMaybe Nothing !v = Just v
+maxMaybe (Just a) v = let !result = max a v in Just result
 
 
 validateOrNoop :: Text -> Maybe Text -> IO Bool
@@ -513,7 +513,7 @@ addSumInt
   -> Int
   -> SdkMeterExemplarOptions
   -> IO ()
-addSumInt delta isMonotonic mExVal k ref lim exOpts = do
+addSumInt !delta isMonotonic mExVal k ref lim exOpts = do
   mex <- captureMetricExemplar exOpts mExVal
   let cap = exemplarReservoirLimit exOpts
   atomicModifyIORef' ref $ \st ->
@@ -554,7 +554,7 @@ addSumDbl
   -> Int
   -> SdkMeterExemplarOptions
   -> IO ()
-addSumDbl delta isMonotonic mExVal k ref lim exOpts = do
+addSumDbl !delta isMonotonic mExVal k ref lim exOpts = do
   mex <- captureMetricExemplar exOpts mExVal
   let cap = exemplarReservoirLimit exOpts
   atomicModifyIORef' ref $ \st ->
@@ -586,17 +586,20 @@ addSumDbl delta isMonotonic mExVal k ref lim exOpts = do
        in (SdkMeterStorageState m' sc', ())
 
 
+-- Force the numeric payload; a strict Either field only forces Left or Right.
 addEither :: Either Int64 Double -> Either Int64 Double -> Either Int64 Double
-addEither (Left a) (Left b) = Left (a + b)
-addEither (Left a) (Right b) = Right (fromIntegral a + b)
-addEither (Right a) (Left b) = Right (a + fromIntegral b)
-addEither (Right a) (Right b) = Right (a + b)
+addEither (Left a) (Left b) = let !total = a + b in Left total
+addEither (Left a) (Right b) = let !total = fromIntegral a + b in Right total
+addEither (Right a) (Left b) = let !total = a + fromIntegral b in Right total
+addEither (Right a) (Right b) = let !total = a + b in Right total
 
 
 mergeHist :: HistCell -> Double -> HistCell
 mergeHist hc v =
   let idx = bucketIndex (hcBounds hc) v
-      b' = V.accum (+) (hcBuckets hc) [(idx, 1)]
+      -- Boxed vector updates do not force the new bucket count.
+      !newCount = hcBuckets hc V.! idx + 1
+      b' = hcBuckets hc V.// [(idx, newCount)]
       sm = hcSum hc + v
       ct = hcCount hc + 1
   in hc

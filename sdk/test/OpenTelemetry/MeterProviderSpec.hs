@@ -2,10 +2,12 @@
 
 module OpenTelemetry.MeterProviderSpec (spec) where
 
+import Control.Monad (replicateM_)
 import Data.Int (Int64)
 import Data.Text (Text)
 import qualified Data.Vector as V
 import Data.Word (Word64)
+import GHC.Stats (gc, gcdetails_live_bytes, getRTSStats, getRTSStatsEnabled)
 import OpenTelemetry.Attributes (addAttribute, defaultAttributeLimits, emptyAttributes, lookupAttribute)
 import OpenTelemetry.Attributes.Attribute (Attribute (..), PrimitiveAttribute (..))
 import OpenTelemetry.Exporter.Metric (
@@ -38,6 +40,7 @@ import OpenTelemetry.Metric.Core (
  )
 import OpenTelemetry.Metric.View (View (..), ViewAggregation (..), ViewSelector (..))
 import OpenTelemetry.Resource (emptyMaterializedResources)
+import System.Mem (performMajorGC)
 import Test.Hspec
 
 
@@ -72,6 +75,7 @@ firstMetric _ = error "expected single ResourceMetricsExport"
 
 spec :: Spec
 spec = do
+  retentionSpec
   describe "OpenTelemetry.MeterProvider" $ do
     -- Counter (Int64)
     it "aggregates Int64 counter measurements (cumulative sum)" $ do
@@ -499,3 +503,48 @@ spec = do
       case batches of
         [rme] -> V.null (resourceMetricsScopes rme) `shouldBe` True
         _ -> expectationFailure "expected single ResourceMetricsExport"
+
+
+-- Measure retained state without reading or exporting accumulator values.
+-- Keep the provider alive through the second collection and the final assertion.
+assertBoundedRetention :: (Meter -> IO (IO ())) -> Expectation
+assertBoundedRetention makeRecord = do
+  getRTSStatsEnabled `shouldReturn` True
+  (provider, env) <- createMeterProvider emptyMaterializedResources defaultSdkMeterProviderOptions
+  m <- getMeter provider "retention"
+  record <- makeRecord m
+  replicateM_ 200000 record
+  performMajorGC
+  before <- gcdetails_live_bytes . gc <$> getRTSStats
+  replicateM_ 200000 record
+  performMajorGC
+  after <- gcdetails_live_bytes . gc <$> getRTSStats
+  -- One fixed series should not retain memory in proportion to its updates.
+  -- Allow 1 MiB for unrelated runtime/test-runner state.
+  toInteger after - toInteger before `shouldSatisfy` (< 1024 * 1024)
+  batches <- collectResourceMetrics env
+  length batches `shouldBe` 1
+  shutdownMeterProvider provider Nothing `shouldReturn` ShutdownSuccess
+
+
+retentionSpec :: Spec
+retentionSpec = describe "bounded metric retention without export" $ do
+  it "keeps Int64 counter sums strict" $ assertBoundedRetention $ \m -> do
+    c <- meterCreateCounterInt64 m "counter" Nothing Nothing defaultAdvisoryParameters
+    pure $ counterAdd c 1 emptyAttributes
+  it "keeps Double counter sums strict" $ assertBoundedRetention $ \m -> do
+    c <- meterCreateCounterDouble m "counter" Nothing Nothing defaultAdvisoryParameters
+    pure $ counterAdd c 1.5 emptyAttributes
+  it "keeps Int64 up-down counter sums strict" $ assertBoundedRetention $ \m -> do
+    c <- meterCreateUpDownCounterInt64 m "active" Nothing Nothing defaultAdvisoryParameters
+    pure $ upDownCounterAdd c 1 emptyAttributes >> upDownCounterAdd c (-1) emptyAttributes
+  it "keeps Double up-down counter sums strict" $ assertBoundedRetention $ \m -> do
+    c <- meterCreateUpDownCounterDouble m "active" Nothing Nothing defaultAdvisoryParameters
+    pure $ upDownCounterAdd c 1.5 emptyAttributes >> upDownCounterAdd c (-1.5) emptyAttributes
+  it "keeps explicit histogram buckets and extrema strict" $ assertBoundedRetention $ \m -> do
+    h <- meterCreateHistogram m "duration" Nothing Nothing defaultAdvisoryParameters
+    pure $ histogramRecord h 0.5 emptyAttributes
+  it "keeps exponential histogram extrema strict" $ assertBoundedRetention $ \m -> do
+    let adv = defaultAdvisoryParameters {advisoryHistogramAggregation = Just (HistogramAggregationExponential 4)}
+    h <- meterCreateHistogram m "duration" Nothing Nothing adv
+    pure $ histogramRecord h 0.5 emptyAttributes

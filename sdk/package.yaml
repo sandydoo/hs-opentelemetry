@@ -171,7 +171,7 @@ tests:
     ghc-options:
     - -threaded
     - -rtsopts
-    - -with-rtsopts=-N
+    - '"-with-rtsopts=-N -T"'
     dependencies:
     - async
     - bytestring

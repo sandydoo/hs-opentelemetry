@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Force counter sums and histogram bucket counts and extrema when recording.
+  Repeated measurements no longer retain arithmetic expressions until export.
+  This covers integer and double sums, and explicit and exponential histograms.
+
 ## 1.0.0.0 - 2026-05-29
 
 ### Spec conformance (1.55.0 audit)
